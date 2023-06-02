@@ -38,15 +38,15 @@ def get_config():
     config.add_argument("--factor", type=int, default=2)
     config.add_argument("--max_steps", type=int, default=200_000)
     config.add_argument("--batch_size", type=int, default=2048)
-    config.add_argument("--do_eval", action="store_false")
+    config.add_argument("--do_eval", action="store_true")
     config.add_argument("--continue_training", action="store_true")
     config.add_argument("--save_every", type=int, default=1000)
     config.add_argument("--device", type=str, default="cuda")
     # visualization hyperparams
     config.add_argument("--chunks", type=int, default=8192)
     config.add_argument("--model_weight_path", default="log/model.pt")
-    config.add_argument("--visualize_depth", action="store_true")
-    config.add_argument("--visualize_normals", action="store_true")
+    config.add_argument("--visualize_depth", action="store_false")
+    config.add_argument("--visualize_normals", action="store_false")
     # extracting mesh hyperparams
     config.add_argument("--x_range", nargs="+", type=float, default=[-1.2, 1.2])
     config.add_argument("--y_range", nargs="+", type=float, default=[-1.2, 1.2])

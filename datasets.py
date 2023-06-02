@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 def get_dataset(dataset_name, base_dir, split, factor=4, device=torch.device("cpu")):
-    d = dataset_dict[dataset_name](base_dir, split, factor=factor, device=device)
+    d = dataset_dict[dataset_name](base_dir, split, spherify=True, factor=factor, device=device)
     return d
 
 
