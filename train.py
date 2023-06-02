@@ -2,8 +2,8 @@ import os.path
 import shutil
 from config import get_config
 from scheduler import MipLRDecay
-from loss import NeRFLoss, mse_to_psnr
-from model import MipNeRF
+from loss import NeRFLoss, mse_to_psnr, NormalLoss
+from model import MipNeRF, ReflectNeRF
 import torch
 import torch.optim as optim
 import torch.utils.tensorboard as tb
@@ -21,9 +21,9 @@ def train_model(config):
     eval_data = None
     if config.do_eval:
         eval_data = iter(cycle(get_dataloader(dataset_name=config.dataset_name, base_dir=config.base_dir, split="test", factor=config.factor, batch_size=config.batch_size, shuffle=True, device=config.device)))
-
-    model = MipNeRF(
-        use_viewdirs=config.use_viewdirs,
+   
+    
+    model = ReflectNeRF(
         randomized=config.randomized,
         ray_shape=config.ray_shape,
         white_bkgd=config.white_bkgd,
@@ -40,6 +40,8 @@ def train_model(config):
         viewdirs_max_deg=config.viewdirs_max_deg,
         device=config.device,
     )
+    
+    
     optimizer = optim.AdamW(model.parameters(), lr=config.lr_init, weight_decay=config.weight_decay)
     if config.continue_training:
         model.load_state_dict(torch.load(model_save_path))
@@ -47,6 +49,7 @@ def train_model(config):
 
     scheduler = MipLRDecay(optimizer, lr_init=config.lr_init, lr_final=config.lr_final, max_steps=config.max_steps, lr_delay_steps=config.lr_delay_steps, lr_delay_mult=config.lr_delay_mult)
     loss_func = NeRFLoss(config.coarse_weight_decay)
+    normal_loss_func = NormalLoss()
     model.train()
 
     os.makedirs(config.log_dir, exist_ok=True)
@@ -55,11 +58,15 @@ def train_model(config):
 
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
-        comp_rgb, _, _ = model(rays)
+        comp_rgb, distance, acc, normal = model(rays)
         pixels = pixels.to(config.device)
 
         # Compute loss and update model weights.
         loss_val, psnr = loss_func(comp_rgb, pixels, rays.lossmult.to(config.device))
+        
+        density_grad = model.get_density_grad(rays, distance[1])
+        loss_val += normal_loss_func(normal, density_grad)
+        
         optimizer.zero_grad()
         loss_val.backward()
         optimizer.step()
@@ -93,7 +100,7 @@ def eval_model(config, model, data):
     model.eval()
     rays, pixels = next(data)
     with torch.no_grad():
-        comp_rgb, _, _ = model(rays)
+        comp_rgb, distance, acc, normal = model(rays)
     pixels = pixels.to(config.device)
     model.train()
     return torch.tensor([mse_to_psnr(torch.mean((rgb - pixels[..., :3])**2)) for rgb in comp_rgb])

@@ -208,13 +208,11 @@ def sample_along_rays(origins, directions, radii, num_samples, near, far, random
       covs: torch.tensor, [batch_size, num_samples, 3, 3], sampled covariances.
     """
     batch_size = origins.shape[0]
-
     t_vals = torch.linspace(0., 1., num_samples + 1,  device=origins.device)
     if lindisp:
         t_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * t_vals)
     else:
         t_vals = near * (1. - t_vals) + far * t_vals
-
     if randomized:
         mids = 0.5 * (t_vals[..., 1:] + t_vals[..., :-1])
         upper = torch.cat([mids, t_vals[..., -1:]], -1)

@@ -18,6 +18,13 @@ class NeRFLoss(torch.nn.modules.loss._Loss):
         loss = self.coarse_weight_decay * torch.sum(losses[:-1]) + losses[-1]
         return loss, torch.Tensor(psnrs)
 
+class NormalLoss(torch.nn.modules.loss._Loss):
+    def __init__(self):
+        super(NormalLoss, self).__init__()
+    
+    def forward(self, input, target):
+        loss = ((target-input)**2).sum()
+        return loss
 
 def mse_to_psnr(mse):
     return -10.0 * torch.log10(mse)
