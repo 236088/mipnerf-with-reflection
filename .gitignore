@@ -3,3 +3,4 @@ log/
 __pycache__/
 model_saves/
 .idea/
+open.bat

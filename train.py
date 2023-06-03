@@ -3,7 +3,7 @@ import shutil
 from config import get_config
 from scheduler import MipLRDecay
 from loss import NeRFLoss, mse_to_psnr, NormalLoss
-from model import MipNeRF, ReflectNeRF
+from model import ReflectNeRF
 import torch
 import torch.optim as optim
 import torch.utils.tensorboard as tb
@@ -56,16 +56,20 @@ def train_model(config):
     shutil.rmtree(path.join(config.log_dir, 'train'), ignore_errors=True)
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
 
+    loss_sum=0
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
-        comp_rgb, distance, acc, normal = model(rays)
+        comp_rgb, distance, acc, normal, diff = model(rays)
         pixels = pixels.to(config.device)
 
         # Compute loss and update model weights.
         loss_val, psnr = loss_func(comp_rgb, pixels, rays.lossmult.to(config.device))
         
-        density_grad = model.get_density_grad(rays, distance[1])
-        loss_val += normal_loss_func(normal, density_grad)
+        loss_val += diff.sum()
+        
+        if torch.isnan(loss_val):
+            print("NaN")
+        loss_sum += loss_val.item()
         
         optimizer.zero_grad()
         loss_val.backward()
@@ -79,6 +83,10 @@ def train_model(config):
         logger.add_scalar('train/avg_psnr', float(np.mean(psnr)), global_step=step)
         logger.add_scalar('train/lr', float(scheduler.get_last_lr()[-1]), global_step=step)
 
+        if step%100 == 0:
+            print(loss_sum)
+            loss_sum=0
+            
         if step % config.save_every == 0:
             if eval_data:
                 del rays

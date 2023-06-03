@@ -148,7 +148,7 @@ def sinebow(h):
     return np.stack([f(3 / 6 - h), f(5 / 6 - h), f(7 / 6 - h)], -1)
 
 
-def visualize_normals(depth, acc, scaling=None):
+def visualize_fake_normals(depth, acc, scaling=None):
     """Visualize fake normals of `depth` (optionally scaled to be isotropic)."""
     if scaling is None:
         mask = ~np.isnan(depth)
@@ -167,6 +167,15 @@ def visualize_normals(depth, acc, scaling=None):
             vis = vis * acc[:, :, None] + (1 - acc)[:, :, None]
 
         return vis
+
+def visualize_real_normals(normals, acc):
+    vis = np.isnan(normals) + np.nan_to_num((normals + 1) / 2, 0)
+
+    # Set non-accumulated pixels to white.
+    if acc is not None:
+        vis = vis * acc[:, :, None] + (1 - acc)[:, :, None]
+
+    return vis
 
 
 def visualize_depth(depth,

@@ -2,18 +2,17 @@ import torch
 import os
 from os import path
 from config import get_config
-from model import MipNeRF
+from model import ReflectNeRF
 import imageio
 from datasets import get_dataloader
 from tqdm import tqdm
-from pose_utils import visualize_depth, visualize_normals, to8b
+from pose_utils import visualize_depth, visualize_fake_normals, visualize_real_normals, to8b
 
 
 def visualize(config):
     data = get_dataloader(config.dataset_name, config.base_dir, split="render", factor=config.factor, shuffle=False)
 
-    model = MipNeRF(
-        use_viewdirs=config.use_viewdirs,
+    model = ReflectNeRF(
         randomized=config.randomized,
         ray_shape=config.ray_shape,
         white_bkgd=config.white_bkgd,
@@ -52,7 +51,7 @@ def visualize(config):
     if config.visualize_normals:
         normal_frames = []
     for i, ray in enumerate(tqdm(data)):
-        img, dist, acc = model.render_image(ray, data.h, data.w, chunks=config.chunks)
+        img, dist, normal, acc = model.render_image(ray, data.h, data.w, chunks=config.chunks)
         imageio.imwrite(path.join(img_dir, f"{i:03}.png"), img)
         rgb_frames.append(img)
         if config.visualize_depth:
@@ -60,7 +59,7 @@ def visualize(config):
             depth_frames.append(depth)
             imageio.imwrite(path.join(depth_dir, f"{i:03}.png"), depth)
         if config.visualize_normals:
-            normal = to8b(visualize_normals(dist, acc))
+            normal = to8b(visualize_real_normals(normal, acc))
             normal_frames.append(normal)
             imageio.imwrite(path.join(normal_dir, f"{i:03}.png"), normal)
 
