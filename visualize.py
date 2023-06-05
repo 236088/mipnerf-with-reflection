@@ -15,7 +15,6 @@ def visualize(config):
     model = ReflectNeRF(
         randomized=config.randomized,
         ray_shape=config.ray_shape,
-        white_bkgd=config.white_bkgd,
         num_levels=config.num_levels,
         num_samples=config.num_samples,
         hidden=config.hidden,

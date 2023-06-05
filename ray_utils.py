@@ -276,7 +276,7 @@ def resample_along_rays(origins, directions, radii, t_vals, weights, randomized,
     return new_t_vals, (means, covs)
 
 
-def volumetric_rendering(value, density, t_vals, dirs, white_bkgd):
+def volumetric_rendering(value, density, t_vals, dirs, visibility, bkgd):
     """Volumetric Rendering Function.
 
     Args:
@@ -303,12 +303,11 @@ def volumetric_rendering(value, density, t_vals, dirs, white_bkgd):
         torch.zeros_like(density_delta[..., :1]),
         torch.cumsum(density_delta[..., :-1], dim=-1)
     ], dim=-1))
-    weights = alpha * trans
+    weights = alpha * trans * visibility
 
     comp_value = (weights[..., None] * value).sum(dim=-2)
     acc = weights.sum(dim=-1)
     distance = (weights * t_mids).sum(dim=-1) / acc
     distance = torch.clamp(torch.nan_to_num(distance), t_vals[:, 0], t_vals[:, -1])
-    if white_bkgd:
-        comp_value = comp_value + (1. - acc[..., None])
+    comp_value[...,:3] = comp_value[...,:3] + (1. - acc[..., None])*bkgd.to(value)
     return comp_value, distance, acc, weights, alpha

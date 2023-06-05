@@ -26,7 +26,6 @@ def train_model(config):
     model = ReflectNeRF(
         randomized=config.randomized,
         ray_shape=config.ray_shape,
-        white_bkgd=config.white_bkgd,
         num_levels=config.num_levels,
         num_samples=config.num_samples,
         hidden=config.hidden,
@@ -49,7 +48,6 @@ def train_model(config):
 
     scheduler = MipLRDecay(optimizer, lr_init=config.lr_init, lr_final=config.lr_final, max_steps=config.max_steps, lr_delay_steps=config.lr_delay_steps, lr_delay_mult=config.lr_delay_mult)
     loss_func = NeRFLoss(config.coarse_weight_decay)
-    normal_loss_func = NormalLoss()
     model.train()
 
     os.makedirs(config.log_dir, exist_ok=True)
@@ -57,15 +55,14 @@ def train_model(config):
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
 
     loss_sum=0
+    normal_loss_sum=0
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
-        comp_rgb, distance, acc, normal, diff = model(rays)
+        comp_rgb, distance, acc, weight, ks, normal = model(rays)
         pixels = pixels.to(config.device)
 
         # Compute loss and update model weights.
         loss_val, psnr = loss_func(comp_rgb, pixels, rays.lossmult.to(config.device))
-        
-        loss_val += diff.sum()
         
         if torch.isnan(loss_val):
             print("NaN")
@@ -73,6 +70,7 @@ def train_model(config):
         
         optimizer.zero_grad()
         loss_val.backward()
+        
         optimizer.step()
         scheduler.step()
 
@@ -85,6 +83,7 @@ def train_model(config):
 
         if step%100 == 0:
             print(loss_sum)
+            # print(normal_loss_sum)
             loss_sum=0
             
         if step % config.save_every == 0:
@@ -108,7 +107,7 @@ def eval_model(config, model, data):
     model.eval()
     rays, pixels = next(data)
     with torch.no_grad():
-        comp_rgb, distance, acc, normal = model(rays)
+        comp_rgb, distance, acc, weight, ks, normal = model(rays)
     pixels = pixels.to(config.device)
     model.train()
     return torch.tensor([mse_to_psnr(torch.mean((rgb - pixels[..., :3])**2)) for rgb in comp_rgb])
