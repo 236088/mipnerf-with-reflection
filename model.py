@@ -123,8 +123,9 @@ class ReflectNeRF(nn.Module):
         accs = []
         weights = []
         
-        comp_ks = []
+        comp_kss = []
         comp_normals = []
+        comp_penalties = []
         
         for l in range(self.num_levels):
             # sample
@@ -150,7 +151,7 @@ class ReflectNeRF(nn.Module):
             new_encodings = self.density_net1(new_encodings)
             raw_density = self.final_density(new_encodings).reshape((-1, self.num_samples, 1))
             raw_normal = self.final_normal(new_encodings).reshape((-1, self.num_samples, 3))
-            ks = self.final_ks(new_encodings).reshape((-1, self.num_samples, 1))
+            raw_ks = self.final_ks(new_encodings).reshape((-1, self.num_samples, 1))
 
             # normal = nn.functional.normalize(raw_normal, dim=-1, eps=1e-8)
             
@@ -170,22 +171,23 @@ class ReflectNeRF(nn.Module):
                 raw_density += self.density_noise * torch.rand(raw_density.shape, dtype=raw_density.dtype, device=raw_density.device)
 
             # volumetric rendering
-            rgbs = raw_rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
-            values = torch.cat([rgbs, raw_normal, ks], dim=-1)
+            rgb = raw_rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
             
             density = self.density_activation(raw_density + self.density_bias)
             
             # visibility = torch.clamp(torch.sum(rays.viewdirs.to(self.device)[...,None,:]  * raw_normal, dim=-1), min=0, max=0)
-            comp_values, distance, acc, weight, alpha = volumetric_rendering(values, density, t_vals, rays.directions.to(rgbs.device), 1, self.bkgd)
+            comp_rgb, comp_normal, comp_ks, distance, acc, weight, alpha = volumetric_rendering(rgb, raw_normal, raw_ks, density, t_vals, rays.directions.to(rgb.device), self.bkgd)
             
             
-            comp_rgbs.append(comp_values[...,:3])
+            comp_rgbs.append(comp_rgb)
             distances.append(distance)
             accs.append(acc)
             weights.append(weight)
             
-            comp_normals.append(nn.functional.normalize(comp_values[...,3:6], dim=-1, eps=1e-8))
-            comp_ks.append(comp_values[...,6:]/(acc[...,None] +1e-8))
+            comp_normals.append(comp_normal)
+            comp_kss.append(comp_ks)
+            if self.training:
+                comp_penalties.append(raw_ks*torch.exp(-density))
                    
         # ks is [0,1] weight of high frequancy to low frequancy interpolation, simultaneously, sharpness value [0, 1/2^(max_deg-1)]
         # 
@@ -207,7 +209,7 @@ class ReflectNeRF(nn.Module):
                 refdirs = rays.viewdirs - 2*torch.sum(rays.viewdirs*normal, dim=-1, keepdim=True)*normal
                 
                 ks = comp_ks[l]
-                radii = rays.radii + ks/2**(self.viewdirs_encoding.max_deg-1)
+                radii = rays.radii + (1-ks)/2**(self.viewdirs_encoding.max_deg-1)
                 
                 # sample
                 if l == 0:  # coarse grain sample
@@ -252,10 +254,14 @@ class ReflectNeRF(nn.Module):
                 density = self.density_activation(raw_density + self.density_bias)
                 
                 # visibility = torch.clamp(torch.sum(refdirs.to(self.device)[...,None,:] * raw_normal, dim=-1), min=0, max=0)
-                comp_rgb, distance, acc, weight, alpha = volumetric_rendering(rgbs, density, t_vals, refdirs.to(rgbs.device), 1, self.bkgd)
+                comp_rgb, distance, acc, weight, alpha = volumetric_rendering(rgbs, None, None, density, t_vals, refdirs.to(rgbs.device), self.bkgd)
 
-                comp_rgbs.append(ks * comp_rgbs[l] + (1 - ks)*comp_rgb)
-        return torch.stack(comp_rgbs), torch.stack(distances), torch.stack(accs), torch.stack(weights), torch.stack(comp_ks), torch.stack(comp_normals)
+                comp_rgbs[l]=(1 - ks)*comp_rgbs[l] + ks*comp_rgb
+        
+        if self.training:
+            return torch.stack(comp_rgbs), torch.stack(distances), torch.stack(accs), torch.stack(weights), torch.stack(comp_kss), torch.stack(comp_normals), torch.stack(comp_penalties)
+        else:
+            return torch.stack(comp_rgbs), torch.stack(distances), torch.stack(accs), torch.stack(weights), torch.stack(comp_kss), torch.stack(comp_normals)
         
     def render_image(self, rays, height, width, chunks=8192):
         """

@@ -38,7 +38,7 @@ def get_config():
     config.add_argument("--factor", type=int, default=2)
     config.add_argument("--max_steps", type=int, default=100_000)
     config.add_argument("--batch_size", type=int, default=1024)
-    config.add_argument("--do_eval", action="store_true")
+    config.add_argument("--do_eval", action="store_false")
     config.add_argument("--continue_training", action="store_true")
     config.add_argument("--save_every", type=int, default=1000)
     config.add_argument("--device", type=str, default="cuda")

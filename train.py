@@ -48,6 +48,7 @@ def train_model(config):
 
     scheduler = MipLRDecay(optimizer, lr_init=config.lr_init, lr_final=config.lr_final, max_steps=config.max_steps, lr_delay_steps=config.lr_delay_steps, lr_delay_mult=config.lr_delay_mult)
     loss_func = NeRFLoss(config.coarse_weight_decay)
+    
     model.train()
 
     os.makedirs(config.log_dir, exist_ok=True)
@@ -55,21 +56,24 @@ def train_model(config):
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
 
     loss_sum=0
-    normal_loss_sum=0
+    penalty_sum=0
+    
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
-        comp_rgb, distance, acc, weight, ks, normal = model(rays)
+        comp_rgb, distance, acc, weight, ks, normal, penalty = model(rays)
         pixels = pixels.to(config.device)
 
         # Compute loss and update model weights.
         loss_val, psnr = loss_func(comp_rgb, pixels, rays.lossmult.to(config.device))
+        penalty_val = 0.01*penalty.sum()
         
         if torch.isnan(loss_val):
             print("NaN")
         loss_sum += loss_val.item()
+        penalty_sum += penalty_val.item()
         
         optimizer.zero_grad()
-        loss_val.backward()
+        (loss_val+penalty_val).backward()
         
         optimizer.step()
         scheduler.step()
@@ -83,8 +87,10 @@ def train_model(config):
 
         if step%100 == 0:
             print(loss_sum)
+            print(penalty_sum)
             # print(normal_loss_sum)
             loss_sum=0
+            penalty_sum=0
             
         if step % config.save_every == 0:
             if eval_data:

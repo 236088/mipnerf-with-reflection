@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn as nn
 import collections
 
 
@@ -276,18 +277,18 @@ def resample_along_rays(origins, directions, radii, t_vals, weights, randomized,
     return new_t_vals, (means, covs)
 
 
-def volumetric_rendering(value, density, t_vals, dirs, visibility, bkgd):
+def volumetric_rendering(rgb, normal, ks, density, t_vals, dirs, bkgd):
     """Volumetric Rendering Function.
 
     Args:
-    value: torch.tensor(float32), color, [batch_size, num_samples, 3]
+    rgb: torch.tensor(float32), color, [batch_size, num_samples, 3]
     density: torch.tensor(float32), density, [batch_size, num_samples, 1].
     t_vals: torch.tensor(float32), [batch_size, num_samples].
     dirs: torch.tensor(float32), [batch_size, 3].
     white_bkgd: bool.
 
     Returns:
-    comp_value: torch.tensor(float32), [batch_size, 3].
+    comp_rgb: torch.tensor(float32), [batch_size, 3].
     disp: torch.tensor(float32), [batch_size].
     acc: torch.tensor(float32), [batch_size].
     weights: torch.tensor(float32), [batch_size, num_samples]
@@ -297,17 +298,25 @@ def volumetric_rendering(value, density, t_vals, dirs, visibility, bkgd):
     delta = t_dists * torch.linalg.norm(dirs[..., None, :], dim=-1)
     # Note that we're quietly turning density from [..., 0] to [...].
     density_delta = density[..., 0] * delta
-
+    
     alpha = 1 - torch.exp(-density_delta)
     trans = torch.exp(-torch.cat([
         torch.zeros_like(density_delta[..., :1]),
         torch.cumsum(density_delta[..., :-1], dim=-1)
     ], dim=-1))
-    weights = alpha * trans * visibility
+    weights = alpha * trans
+    
 
-    comp_value = (weights[..., None] * value).sum(dim=-2)
+    comp_rgb = (weights[..., None] * rgb).sum(dim=-2)
     acc = weights.sum(dim=-1)
     distance = (weights * t_mids).sum(dim=-1) / acc
     distance = torch.clamp(torch.nan_to_num(distance), t_vals[:, 0], t_vals[:, -1])
-    comp_value[...,:3] = comp_value[...,:3] + (1. - acc[..., None])*bkgd.to(value)
-    return comp_value, distance, acc, weights, alpha
+    comp_rgb = comp_rgb + (1. - acc[..., None])*bkgd.to(rgb)
+    if normal==None or ks==None:
+        return comp_rgb, distance, acc, weights, alpha
+    
+    comp_normal = (weights[...,None] * normal).sum(dim=-2)
+    comp_normal = nn.functional.normalize(comp_normal, dim=-1, eps=1e-8)
+    comp_ks = (weights[...,None] * ks).sum(dim=-2) / acc[...,None]
+    comp_ks = torch.clamp(torch.nan_to_num(comp_ks), 0, 1)
+    return comp_rgb, comp_normal, comp_ks, distance, acc, weights, alpha
