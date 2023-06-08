@@ -125,7 +125,6 @@ class ReflectNeRF(nn.Module):
         
         comp_kss = []
         comp_normals = []
-        comp_penalties = []
         
         for l in range(self.num_levels):
             # sample
@@ -186,8 +185,6 @@ class ReflectNeRF(nn.Module):
             
             comp_normals.append(comp_normal)
             comp_kss.append(comp_ks)
-            if self.training:
-                comp_penalties.append(raw_ks*torch.exp(-density))
                    
         # ks is [0,1] weight of high frequancy to low frequancy interpolation, simultaneously, sharpness value [0, 1/2^(max_deg-1)]
         # 
@@ -256,12 +253,9 @@ class ReflectNeRF(nn.Module):
                 # visibility = torch.clamp(torch.sum(refdirs.to(self.device)[...,None,:] * raw_normal, dim=-1), min=0, max=0)
                 comp_rgb, distance, acc, weight, alpha = volumetric_rendering(rgbs, None, None, density, t_vals, refdirs.to(rgbs.device), self.bkgd)
 
-                comp_rgbs[l]=(1 - ks)*comp_rgbs[l] + ks*comp_rgb
+                comp_rgbs.append((1 - ks)*comp_rgbs[l] + ks*comp_rgb)
         
-        if self.training:
-            return torch.stack(comp_rgbs), torch.stack(distances), torch.stack(accs), torch.stack(weights), torch.stack(comp_kss), torch.stack(comp_normals), torch.stack(comp_penalties)
-        else:
-            return torch.stack(comp_rgbs), torch.stack(distances), torch.stack(accs), torch.stack(weights), torch.stack(comp_kss), torch.stack(comp_normals)
+        return torch.stack(comp_rgbs), torch.stack(distances), torch.stack(accs), torch.stack(weights), torch.stack(comp_kss), torch.stack(comp_normals)
         
     def render_image(self, rays, height, width, chunks=8192):
         """

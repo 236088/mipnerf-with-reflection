@@ -1,4 +1,5 @@
 import os.path
+import sys
 import shutil
 from config import get_config
 from scheduler import MipLRDecay
@@ -22,10 +23,11 @@ def train_model(config):
     if config.do_eval:
         eval_data = iter(cycle(get_dataloader(dataset_name=config.dataset_name, base_dir=config.base_dir, split="test", factor=config.factor, batch_size=config.batch_size, shuffle=True, device=config.device)))
    
-    
+    bkgd = torch.ones([3]) if config.white_bkgd else torch.zeros([3])
     model = ReflectNeRF(
         randomized=config.randomized,
         ray_shape=config.ray_shape,
+        bkgd=bkgd,
         num_levels=config.num_levels,
         num_samples=config.num_samples,
         hidden=config.hidden,
@@ -56,24 +58,21 @@ def train_model(config):
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
 
     loss_sum=0
-    penalty_sum=0
     
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
-        comp_rgb, distance, acc, weight, ks, normal, penalty = model(rays)
+        comp_rgb, distance, acc, weight, ks, normal = model(rays)
         pixels = pixels.to(config.device)
 
         # Compute loss and update model weights.
         loss_val, psnr = loss_func(comp_rgb, pixels, rays.lossmult.to(config.device))
-        penalty_val = 0.01*penalty.sum()
         
         if torch.isnan(loss_val):
-            print("NaN")
+            sys.exit(f'train stop for bump NaN. step:{step}')
         loss_sum += loss_val.item()
-        penalty_sum += penalty_val.item()
         
         optimizer.zero_grad()
-        (loss_val+penalty_val).backward()
+        loss_val.backward()
         
         optimizer.step()
         scheduler.step()
@@ -87,10 +86,8 @@ def train_model(config):
 
         if step%100 == 0:
             print(loss_sum)
-            print(penalty_sum)
             # print(normal_loss_sum)
             loss_sum=0
-            penalty_sum=0
             
         if step % config.save_every == 0:
             if eval_data:
