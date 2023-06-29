@@ -11,6 +11,7 @@ from os import path
 from datasets import get_dataloader, cycle
 import numpy as np
 from tqdm import tqdm
+import imageio
 
 
 def train_model(config):
@@ -22,6 +23,9 @@ def train_model(config):
     if config.do_eval:
         eval_data = iter(cycle(get_dataloader(dataset_name=config.dataset_name, base_dir=config.base_dir, split="test", factor=config.factor, batch_size=config.batch_size, shuffle=True, device=config.device)))
 
+    loader = get_dataloader(config.dataset_name, config.base_dir, split="render", factor=config.factor, shuffle=False)
+    visualize_data = iter(cycle(loader))
+    
     model = MipNeRF(
         use_viewdirs=config.use_viewdirs,
         randomized=config.randomized,
@@ -53,6 +57,10 @@ def train_model(config):
     shutil.rmtree(path.join(config.log_dir, 'train'), ignore_errors=True)
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
 
+    visualize_every = 0.999
+    i = 0
+    img_dir = path.join(config.log_dir, "img")
+    
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
         comp_rgb, _, _ = model(rays)
@@ -72,6 +80,11 @@ def train_model(config):
         logger.add_scalar('train/avg_psnr', float(np.mean(psnr)), global_step=step)
         logger.add_scalar('train/lr', float(scheduler.get_last_lr()[-1]), global_step=step)
 
+        if step > visualize_every:
+            visualize_model(config, model, visualize_data, loader.h, loader.w, img_dir, i)
+            visualize_every *= 1.1
+            i+=1
+            
         if step % config.save_every == 0:
             if eval_data:
                 del rays
@@ -88,7 +101,13 @@ def train_model(config):
     torch.save(model.state_dict(), model_save_path)
     torch.save(optimizer.state_dict(), optimizer_save_path)
 
-
+def visualize_model(config, model, data, h, w, img_dir, i):
+    model.eval()
+    rays = next(data)
+    img, dist, acc = model.render_image(rays, h, w, chunks=config.chunks)
+    imageio.imwrite(path.join(img_dir, f"{i:03}.png"), img)
+    model.train()
+    
 def eval_model(config, model, data):
     model.eval()
     rays, pixels = next(data)
