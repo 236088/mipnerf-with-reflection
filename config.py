@@ -36,7 +36,7 @@ def get_config():
     config.add_argument("--weight_decay", type=float, default=1e-5)
     # training hyperparams
     config.add_argument("--factor", type=int, default=2)
-    config.add_argument("--max_steps", type=int, default=200_000)
+    config.add_argument("--max_steps", type=int, default=100_000)
     config.add_argument("--batch_size", type=int, default=2048)
     config.add_argument("--do_eval", action="store_true")
     config.add_argument("--continue_training", action="store_true")

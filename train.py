@@ -57,7 +57,7 @@ def train_model(config):
     shutil.rmtree(path.join(config.log_dir, 'train'), ignore_errors=True)
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
 
-    visualize_every = 0.999
+    visualize_every = 1000
     i = 0
     img_dir = path.join(config.log_dir, "img")
     
@@ -80,9 +80,8 @@ def train_model(config):
         logger.add_scalar('train/avg_psnr', float(np.mean(psnr)), global_step=step)
         logger.add_scalar('train/lr', float(scheduler.get_last_lr()[-1]), global_step=step)
 
-        if step > visualize_every:
+        if step%visualize_every == 0:
             visualize_model(config, model, visualize_data, loader.h, loader.w, img_dir, i)
-            visualize_every *= 1.1
             i+=1
             
         if step % config.save_every == 0:
