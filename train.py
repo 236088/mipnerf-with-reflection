@@ -52,6 +52,8 @@ def train_model(config):
     os.makedirs(config.log_dir, exist_ok=True)
     shutil.rmtree(path.join(config.log_dir, 'train'), ignore_errors=True)
     logger = tb.SummaryWriter(path.join(config.log_dir, 'train'), flush_secs=1)
+    log_every = 100
+    loss_sum = 0
 
     for step in tqdm(range(0, config.max_steps)):
         rays, pixels = next(data)
@@ -60,6 +62,7 @@ def train_model(config):
 
         # Compute loss and update model weights.
         loss_val, psnr = loss_func(comp_rgb, pixels, rays.lossmult.to(config.device))
+        loss_sum += loss_val.item()
         optimizer.zero_grad()
         loss_val.backward()
         optimizer.step()
@@ -72,6 +75,10 @@ def train_model(config):
         logger.add_scalar('train/avg_psnr', float(np.mean(psnr)), global_step=step)
         logger.add_scalar('train/lr', float(scheduler.get_last_lr()[-1]), global_step=step)
 
+        if step%log_every == 0:
+            print(loss_sum)
+            loss_sum = 0
+            
         if step % config.save_every == 0:
             if eval_data:
                 del rays

@@ -18,7 +18,7 @@ def get_config():
     config.add_argument("--override_defaults", action="store_true")
     config.add_argument("--num_levels", type=int, default=2)
     config.add_argument("--num_samples", type=int, default=128)
-    config.add_argument("--hidden", type=int, default=256)
+    config.add_argument("--hidden", type=int, default=128)
     config.add_argument("--density_noise", type=float, default=0.0)
     config.add_argument("--density_bias", type=float, default=-1.0)
     config.add_argument("--rgb_padding", type=float, default=0.001)
@@ -26,7 +26,7 @@ def get_config():
     config.add_argument("--min_deg", type=int, default=0)
     config.add_argument("--max_deg", type=int, default=16)
     config.add_argument("--viewdirs_min_deg", type=int, default=0)
-    config.add_argument("--viewdirs_max_deg", type=int, default=4)
+    config.add_argument("--viewdirs_max_deg", type=int, default=8)
     # loss and optimizer hyperparams
     config.add_argument("--coarse_weight_decay", type=float, default=0.1)
     config.add_argument("--lr_init", type=float, default=1e-3)
@@ -36,7 +36,7 @@ def get_config():
     config.add_argument("--weight_decay", type=float, default=1e-5)
     # training hyperparams
     config.add_argument("--factor", type=int, default=2)
-    config.add_argument("--max_steps", type=int, default=200_000)
+    config.add_argument("--max_steps", type=int, default=50_000)
     config.add_argument("--batch_size", type=int, default=2048)
     config.add_argument("--do_eval", action="store_true")
     config.add_argument("--continue_training", action="store_true")
