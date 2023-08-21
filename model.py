@@ -1,34 +1,50 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from ray_utils import sample_along_rays, resample_along_rays, volumetric_rendering, namedtuple_map
 from pose_utils import to8b
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, min_deg, max_deg):
+    def __init__(self, channels, size=512):
         super(PositionalEncoding, self).__init__()
-        self.min_deg = min_deg
-        self.max_deg = max_deg
-        self.scales = nn.Parameter(torch.tensor([2 ** i for i in range(min_deg, max_deg)]), requires_grad=False)
+        
+        self.channels = channels
+        self.mxy = torch.randn((self.channels, size, size), requires_grad=True)
+        self.myz = torch.randn((self.channels, size, size), requires_grad=True)
+        self.mzx = torch.randn((self.channels, size, size), requires_grad=True)
 
-    def forward(self, x, y=None):
-        shape = list(x.shape[:-1]) + [-1]
-        x_enc = (x[..., None, :] * self.scales[:, None]).reshape(shape)
-        x_enc = torch.cat((x_enc, x_enc + 0.5 * torch.pi), -1)
-        if y is not None:
-            # IPE
-            y_enc = (y[..., None, :] * self.scales[:, None]**2).reshape(shape)
-            y_enc = torch.cat((y_enc, y_enc), -1)
-            x_ret = torch.exp(-0.5 * y_enc) * torch.sin(x_enc)
-            y_ret = torch.maximum(torch.zeros_like(y_enc), 0.5 * (1 - torch.exp(-2 * y_enc) * torch.cos(2 * x_enc)) - x_ret ** 2)
-            return x_ret, y_ret
-        else:
-            # PE
-            x_ret = torch.sin(x_enc)
-            return x_ret
+    def generate_mipmap(image):
+        mipmap = [image]
+        h, w = image.shape[-2:]
+        while h > 1 and w > 1:
+            image = F.interpolate(image.unsqueeze(0), scale_factor=0.5, mode='bilinear', recompute_scale_factor=True).squeeze(0)
+            mipmap.append(image)
+            h, w = h // 2, w // 2
+        return mipmap
+    
+    def trilinear_interpolation(mipmap, x, y, level):
+        level0 = torch.floor(level).long().item()
+        level1 = torch.clamp(level0 + 1, max=len(mipmap)-1).item()
+        x0 = torch.tensor([y * mipmap[level0].shape[-2], x * mipmap[level0].shape[-1]]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        x1 = torch.tensor([y * mipmap[level1].shape[-2], x * mipmap[level1].shape[-1]]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        inter_level0 = F.grid_sample(mipmap[level0].unsqueeze(0).unsqueeze(0), x0, mode='bilinear', padding_mode='zeros', align_corners=True)
+        inter_level1 = F.grid_sample(mipmap[level1].unsqueeze(0).unsqueeze(0), x1, mode='bilinear', padding_mode='zeros', align_corners=True)
+        return inter_level0 * (1 - (level - level0)) + inter_level1 * (level - level0)
 
 
-class MipNeRF(nn.Module):
+    def forward(self, x, r):
+        
+        mip_xy = self.generate_mipmap(self.mxy)
+        mip_yz = self.generate_mipmap(self.myz)
+        mip_zx = self.generate_mipmap(self.mzx)
+        
+        feature_xy = self.trilinear_interpolation(mip_xy, x[...,0], x[...,1], level)
+        feature_yz = self.trilinear_interpolation(mip_yz, x[...,1], x[...,2], level)
+        feature_zx = self.trilinear_interpolation(mip_zx, x[...,2], x[...,0], level)
+
+
+class TriMipNeRF(nn.Module):
     def __init__(self,
                  use_viewdirs=True,
                  randomized=False,
@@ -36,19 +52,15 @@ class MipNeRF(nn.Module):
                  white_bkgd=True,
                  num_levels=2,
                  num_samples=128,
-                 hidden=256,
+                 hidden=128,
                  density_noise=1,
                  density_bias=-1,
                  rgb_padding=0.001,
                  resample_padding=0.01,
-                 min_deg=0,
-                 max_deg=16,
-                 viewdirs_min_deg=0,
-                 viewdirs_max_deg=4,
                  device=torch.device("cpu"),
                  return_raw=False
                  ):
-        super(MipNeRF, self).__init__()
+        super(TriMipNeRF, self).__init__()
         self.use_viewdirs = use_viewdirs
         self.init_randomized = randomized
         self.randomized = randomized
@@ -56,8 +68,6 @@ class MipNeRF(nn.Module):
         self.white_bkgd = white_bkgd
         self.num_levels = num_levels
         self.num_samples = num_samples
-        self.density_input = (max_deg - min_deg) * 3 * 2
-        self.rgb_input = 3 + ((viewdirs_max_deg - viewdirs_min_deg) * 3 * 2)
         self.density_noise = density_noise
         self.rgb_padding = rgb_padding
         self.resample_padding = resample_padding
@@ -66,55 +76,34 @@ class MipNeRF(nn.Module):
         self.device = device
         self.return_raw = return_raw
         self.density_activation = nn.Softplus()
-
-        self.positional_encoding = PositionalEncoding(min_deg, max_deg)
-        self.density_net0 = nn.Sequential(
-            nn.Linear(self.density_input, hidden),
-            nn.ReLU(True),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(True),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(True),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(True),
-        )
-        self.density_net1 = nn.Sequential(
-            nn.Linear(self.density_input + hidden, hidden),
-            nn.ReLU(True),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(True),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(True),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(True),
+        
+        self.density_net = nn.Sequential(
+            nn.Linear(self.channels*3, hidden)
         )
         self.final_density = nn.Sequential(
             nn.Linear(hidden, 1),
         )
+        
+        self.rgb_net = nn.Sequential(
+            nn.Linear(hidden, hidden),
+            nn.ReLU(True),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(True),
+        )
 
-        input_shape = hidden
-        if self.use_viewdirs:
-            input_shape = num_samples
-
-            self.rgb_net0 = nn.Sequential(
-                nn.Linear(hidden, hidden)
-            )
-            self.viewdirs_encoding = PositionalEncoding(viewdirs_min_deg, viewdirs_max_deg)
-            self.rgb_net1 = nn.Sequential(
-                nn.Linear(hidden + self.rgb_input, num_samples),
-                nn.ReLU(True),
-            )
         self.final_rgb = nn.Sequential(
-            nn.Linear(input_shape, 3),
+            nn.Linear(hidden, 3),
             nn.Sigmoid()
         )
         _xavier_init(self)
         self.to(device)
-
+    
     def forward(self, rays):
         comp_rgbs = []
         distances = []
         accs = []
+               
+        
         for l in range(self.num_levels):
             # sample
             if l == 0:  # coarse grain sample
